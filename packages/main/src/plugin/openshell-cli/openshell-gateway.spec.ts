@@ -185,6 +185,66 @@ describe('init', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  test('treats gateway with 0.0.0.0 endpoint as local', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.mocked(openshellCli.listGateways).mockResolvedValue([
+      { name: 'openshell', endpoint: 'http://0.0.0.0:17670', active: false } as GatewayInfo,
+    ]);
+    vi.mocked(openshellCli.checkEndpointStatus).mockResolvedValue(true);
+
+    await gateway.init();
+
+    expect(openshellCli.selectGateway).toHaveBeenCalledWith('openshell');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(openshellCli.addGateway).not.toHaveBeenCalled();
+  });
+
+  test('prefers external gateway over kaiden-local on same port and removes kaiden-local', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.mocked(openshellCli.listGateways).mockResolvedValue([
+      { name: 'kaiden-local', endpoint: 'http://127.0.0.1:17670', active: true, type: 'local' } as GatewayInfo,
+      { name: 'openshell', endpoint: 'http://127.0.0.1:17670', active: false, type: 'local' } as GatewayInfo,
+    ]);
+    vi.mocked(openshellCli.checkEndpointStatus).mockResolvedValue(true);
+
+    await gateway.init();
+
+    expect(openshellCli.selectGateway).toHaveBeenCalledWith('openshell');
+    expect(openshellCli.removeGateway).toHaveBeenCalledWith('kaiden-local');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('prioritizes same-port gateway over different-port gateway when both exist with kaiden-local', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.mocked(openshellCli.listGateways).mockResolvedValue([
+      { name: 'kaiden-local', endpoint: 'http://127.0.0.1:17670', active: true, type: 'local' } as GatewayInfo,
+      { name: 'other', endpoint: 'http://127.0.0.1:18000', active: false, type: 'local' } as GatewayInfo,
+      { name: 'openshell', endpoint: 'http://0.0.0.0:17670', active: false, type: 'local' } as GatewayInfo,
+    ]);
+    vi.mocked(openshellCli.checkEndpointStatus).mockResolvedValue(true);
+
+    await gateway.init();
+
+    expect(openshellCli.selectGateway).toHaveBeenCalledWith('openshell');
+    expect(openshellCli.removeGateway).toHaveBeenCalledWith('kaiden-local');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  test('keeps kaiden-local when external gateway runs on a different port', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.mocked(openshellCli.listGateways).mockResolvedValue([
+      { name: 'kaiden-local', endpoint: 'http://127.0.0.1:17670', active: true, type: 'local' } as GatewayInfo,
+      { name: 'other', endpoint: 'http://127.0.0.1:18000', active: false, type: 'local' } as GatewayInfo,
+    ]);
+    vi.mocked(openshellCli.checkEndpointStatus).mockResolvedValue(true);
+
+    await gateway.init();
+
+    expect(openshellCli.selectGateway).not.toHaveBeenCalled();
+    expect(openshellCli.removeGateway).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   test('auto-starts local gateway when no gateways exist and port is free', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

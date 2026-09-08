@@ -2,7 +2,7 @@
 import { faLock } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@podman-desktop/ui-svelte';
 import { Icon } from '@podman-desktop/ui-svelte/icons';
-import { onMount } from 'svelte';
+import { onMount, untrack } from 'svelte';
 import { toast } from 'svelte-sonner';
 
 import type { ModelInfo } from '/@/lib/chat/components/model-info';
@@ -208,15 +208,22 @@ onMount(async () => {
   }
 });
 let customHosts = $derived(wizard.draft.hostsByMode[wizard.draft.selectedNetwork] ?? []);
-let reachableGateways = $derived($openshellGateways.filter(gateway => gateway.gatewayState?.reachable !== false));
+let reachableGateways = $derived($openshellGateways.filter(gateway => gateway.gatewayState?.reachable === true));
 
 $effect.pre(() => {
-  const selectedGatewayExists = reachableGateways.some(gateway => gateway.name === wizard.draft.selectedGateway);
-  if (!selectedGatewayExists) {
-    const activeGateway = reachableGateways.find(gateway => gateway.active);
-    wizard.draft.selectedGateway =
-      activeGateway?.name ?? (reachableGateways.length === 1 ? (reachableGateways[0]?.name ?? '') : '');
+  const gateways = reachableGateways;
+  if (gateways.length === 0) {
+    wizard.draft.selectedGateway = '';
+    return;
   }
+
+  const selected = untrack(() => wizard.draft.selectedGateway);
+  if (selected && gateways.some(gateway => gateway.name === selected)) {
+    return;
+  }
+
+  const activeGateway = gateways.find(gateway => gateway.active);
+  wizard.draft.selectedGateway = activeGateway?.name ?? (gateways.length === 1 ? (gateways[0]?.name ?? '') : '');
 });
 
 function getDefaultSessionName(path: string): string {

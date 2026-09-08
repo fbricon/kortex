@@ -105,10 +105,39 @@ export class OpenshellGateway implements Disposable {
         }),
       );
       if (localGateways.length > 0) {
-        for (const gw of localGateways) {
+        // When an unmanaged gateway runs on the kaiden-local default port, try it first
+        // so we select the user's gateway instead of the auto-registered one.
+        const kaidenLocal = localGateways.find(gw => gw.name === DEFAULT_GATEWAY_NAME);
+        const kaidenLocalPort = kaidenLocal ? this.getEndpointPort(kaidenLocal.endpoint) : undefined;
+        const hasSamePortDuplicate =
+          kaidenLocalPort !== undefined &&
+          localGateways.some(
+            gw => gw.name !== DEFAULT_GATEWAY_NAME && this.getEndpointPort(gw.endpoint) === kaidenLocalPort,
+          );
+        const ordered = hasSamePortDuplicate
+          ? [...localGateways].sort((a, b) => {
+              const rank = (gw: typeof kaidenLocal): number =>
+                gw!.name !== DEFAULT_GATEWAY_NAME && this.getEndpointPort(gw!.endpoint) === kaidenLocalPort
+                  ? 0
+                  : gw!.name === DEFAULT_GATEWAY_NAME
+                    ? 2
+                    : 1;
+              return rank(a) - rank(b);
+            })
+          : localGateways;
+        for (const gw of ordered) {
           if (await this.isEndpointHealthy(gw.endpoint)) {
             if (!gw.active) {
               await this.openshellCli.selectGateway(gw.name);
+            }
+            // Remove the redundant kaiden-local registration when another gateway on the
+            // same port is healthy, otherwise all CLI calls would target kaiden-local.
+            if (
+              gw.name !== DEFAULT_GATEWAY_NAME &&
+              kaidenLocal &&
+              kaidenLocalPort === this.getEndpointPort(gw.endpoint)
+            ) {
+              await this.openshellCli.removeGateway(DEFAULT_GATEWAY_NAME).catch(() => {});
             }
             console.log(`[openshell-gateway] gateway detected (${gw.endpoint}) and is healthy`);
             this._onDidGatewayStart.fire();
@@ -162,10 +191,19 @@ export class OpenshellGateway implements Disposable {
     return this.openshellCli.checkEndpointStatus(target);
   }
 
+  private getEndpointPort(endpoint: string): number | undefined {
+    try {
+      const port = new URL(endpoint).port;
+      return port ? Number(port) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private isLocalEndpoint(endpoint: string): boolean {
     try {
       const url = new URL(endpoint);
-      return ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
+      return ['127.0.0.1', 'localhost', '::1', '0.0.0.0'].includes(url.hostname);
     } catch {
       return false;
     }
