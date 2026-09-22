@@ -1,5 +1,5 @@
 <script lang="ts">
-import { faPaperclip, faPaperPlane, faSquare, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { faFile, faPaperclip, faPaperPlane, faSquare, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { Icon } from '@podman-desktop/ui-svelte/icons';
 import { toast } from '@zerodevx/svelte-toast';
 import { router } from 'tinro';
@@ -37,7 +37,11 @@ const isDraft = $derived(sessionId === 'new' && !!draftSandboxName);
 
 let events: AcpFlowEvent[] = $state([]);
 let followUpText = $state('');
-let pendingAttachments: AcpAttachment[] = $state([]);
+interface PendingAttachment extends AcpAttachment {
+  previewUrl?: string;
+}
+
+let pendingAttachments: PendingAttachment[] = $state([]);
 let sendError: string | undefined = $state(undefined);
 let fetchSeq = 0;
 let flowContainer: HTMLElement | undefined = $state(undefined);
@@ -427,7 +431,7 @@ function getMimeType(filePath: string): string {
 async function handleAttach(): Promise<void> {
   const result = await window.openDialog({ title: 'Attach files', selectors: ['openFile', 'multiSelections'] });
   if (!result?.length) return;
-  const newAttachments: AcpAttachment[] = [];
+  const newAttachments: PendingAttachment[] = [];
   for (const filePath of result) {
     const fileSize = await window.pathFileSize(filePath);
     const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
@@ -435,7 +439,9 @@ async function handleAttach(): Promise<void> {
       rejectOversizedFile(fileName);
       continue;
     }
-    newAttachments.push({ filePath, fileName, mimeType: getMimeType(filePath) });
+    const mimeType = getMimeType(filePath);
+    const previewUrl = mimeType.startsWith('image/') ? `file://${filePath}` : undefined;
+    newAttachments.push({ filePath, fileName, mimeType, previewUrl });
   }
   if (newAttachments.length > 0) {
     pendingAttachments = [...pendingAttachments, ...newAttachments];
@@ -474,6 +480,15 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (): void => resolve(reader.result as string);
+    reader.onerror = (): void => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 async function addFileAttachment(file: File): Promise<void> {
   if (file.size > MAX_FILE_SIZE_BYTES) {
     rejectOversizedFile(file.name);
@@ -487,7 +502,8 @@ async function addFileAttachment(file: File): Promise<void> {
   mimeType ||= 'application/octet-stream';
   const fileName = file.name || `pasted-file-${Date.now()}.${mimeType.split('/')[1] ?? 'bin'}`;
   const filePath = await window.saveTempAttachment(fileName, base64);
-  pendingAttachments = [...pendingAttachments, { filePath, fileName, mimeType }];
+  const previewUrl = mimeType.startsWith('image/') ? await readFileAsDataUrl(file) : undefined;
+  pendingAttachments = [...pendingAttachments, { filePath, fileName, mimeType, previewUrl }];
 }
 
 let isDragging = $state(false);
@@ -741,20 +757,31 @@ function handleKeyDown(e: KeyboardEvent): void {
         ondragleave={handleDragLeave}
         ondrop={(e): void => { handleDrop(e).catch(console.error); }}
       >
-        <!-- Attachment chips -->
+        <!-- Attachment previews -->
         {#if pendingAttachments.length > 0}
-          <div class="flex flex-wrap gap-1.5 px-3 pt-2">
+          <div
+            class="flex flex-row items-end gap-2 overflow-x-auto px-2 pt-2 pb-0"
+            onwheel={(e): void => { if (e.deltaX !== 0) e.stopPropagation(); }}
+            ontouchmove={(e): void => { e.stopPropagation(); }}
+          >
             {#each pendingAttachments as attachment, i (attachment.filePath)}
-              <span class="inline-flex items-center gap-1 rounded-full bg-[var(--pd-content-card-hover-bg)] text-xs text-[var(--pd-content-text)] px-2.5 py-1">
-                {attachment.fileName}
+              <div class="group/attachment relative flex flex-col gap-1 pt-2 pr-2 shrink-0" title={attachment.fileName}>
                 <button
-                  class="flex items-center justify-center w-4 h-4 rounded-full hover:bg-[var(--pd-content-card-bg)] transition-colors"
+                  class="absolute top-0 right-0 z-10 hidden h-4 w-4 items-center justify-center rounded-full bg-[var(--pd-content-card-bg)] border border-[var(--pd-content-divider)] text-[var(--pd-content-text)] group-hover/attachment:flex group-focus-within/attachment:flex"
                   onclick={(): void => removeAttachment(i)}
-                  title="Remove"
+                  aria-label="Remove attachment"
                 >
                   <Icon icon={faXmark} class="text-[10px]" />
                 </button>
-              </span>
+                <div class="flex h-16 w-20 items-center justify-center rounded-md bg-[var(--pd-content-card-hover-bg)] overflow-hidden">
+                  {#if attachment.previewUrl}
+                    <img src={attachment.previewUrl} alt={attachment.fileName} class="size-full object-cover rounded-md" />
+                  {:else}
+                    <Icon icon={faFile} class="text-[var(--pd-content-text)] opacity-40 fa-2x" />
+                  {/if}
+                </div>
+                <div class="max-w-16 truncate text-xs text-[var(--pd-content-text)] opacity-60" title={attachment.fileName}>{attachment.fileName}</div>
+              </div>
             {/each}
           </div>
         {/if}

@@ -467,6 +467,43 @@ describe('drag-and-drop attachments', () => {
     });
   });
 
+  test('should show image preview for dropped image files', async () => {
+    vi.mocked(acpSessionsStore).acpSessions = writable<AcpSessionInfo[]>([COMPLETED_SESSION]);
+    vi.mocked(window.saveTempAttachment).mockResolvedValue('/tmp/attachment-test.png');
+
+    render(AcpSessionDetail, { sessionId: 'session-1' });
+
+    const dropZone = document.querySelector('[class*="rounded-lg border"]')!;
+    const file = new File(['pixels'], 'screenshot.png', { type: 'image/png' });
+
+    dropZone.dispatchEvent(makeDragEvent('dragenter', [file]));
+    dropZone.dispatchEvent(makeDragEvent('drop', [file]));
+
+    await vi.waitFor(() => {
+      const img = screen.getByAltText('screenshot.png');
+      expect(img).toBeInTheDocument();
+      expect(img.getAttribute('src')).toMatch(/^data:/);
+    });
+  });
+
+  test('should show file icon instead of preview for dropped non-image files', async () => {
+    vi.mocked(acpSessionsStore).acpSessions = writable<AcpSessionInfo[]>([COMPLETED_SESSION]);
+    vi.mocked(window.saveTempAttachment).mockResolvedValue('/tmp/attachment-test.zip');
+
+    render(AcpSessionDetail, { sessionId: 'session-1' });
+
+    const dropZone = document.querySelector('[class*="rounded-lg border"]')!;
+    const file = new File(['data'], 'archive.zip', { type: 'application/zip' });
+
+    dropZone.dispatchEvent(makeDragEvent('dragenter', [file]));
+    dropZone.dispatchEvent(makeDragEvent('drop', [file]));
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('archive.zip')).toBeInTheDocument();
+    });
+    expect(screen.queryByAltText('archive.zip')).not.toBeInTheDocument();
+  });
+
   test('should reject oversized dropped files', async () => {
     vi.mocked(acpSessionsStore).acpSessions = writable<AcpSessionInfo[]>([COMPLETED_SESSION]);
 
@@ -575,5 +612,38 @@ describe('file size validation for dialog', () => {
     await vi.waitFor(() => {
       expect(screen.getByText('small-file.txt')).toBeInTheDocument();
     });
+  });
+
+  test('should show image preview for dialog-attached image files', async () => {
+    vi.mocked(acpSessionsStore).acpSessions = writable<AcpSessionInfo[]>([COMPLETED_SESSION]);
+    vi.mocked(window.openDialog).mockResolvedValue(['/path/to/photo.png']);
+    vi.mocked(window.pathFileSize).mockResolvedValue(100);
+
+    render(AcpSessionDetail, { sessionId: 'session-1' });
+
+    const attachButton = screen.getByTitle('Attach file');
+    await userEvent.click(attachButton);
+
+    await vi.waitFor(() => {
+      const img = screen.getByAltText('photo.png');
+      expect(img).toBeInTheDocument();
+      expect(img).toHaveAttribute('src', 'file:///path/to/photo.png');
+    });
+  });
+
+  test('should show file icon for dialog-attached non-image files', async () => {
+    vi.mocked(acpSessionsStore).acpSessions = writable<AcpSessionInfo[]>([COMPLETED_SESSION]);
+    vi.mocked(window.openDialog).mockResolvedValue(['/path/to/doc.pdf']);
+    vi.mocked(window.pathFileSize).mockResolvedValue(100);
+
+    render(AcpSessionDetail, { sessionId: 'session-1' });
+
+    const attachButton = screen.getByTitle('Attach file');
+    await userEvent.click(attachButton);
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('doc.pdf')).toBeInTheDocument();
+    });
+    expect(screen.queryByAltText('doc.pdf')).not.toBeInTheDocument();
   });
 });
