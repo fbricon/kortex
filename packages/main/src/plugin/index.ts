@@ -1252,6 +1252,13 @@ export class PluginSystem {
     });
 
     this.ipcHandle(
+      'temp-file-service:saveTempAttachment',
+      async (_listener, fileName: string, base64Data: string): Promise<string> => {
+        return tempFileService.saveTempAttachment(fileName, base64Data);
+      },
+    );
+
+    this.ipcHandle(
       'container-provider-registry:startContainer',
       async (_listener, engine: string, containerId: string): Promise<void> => {
         return containerProviderRegistry.startContainer(engine, containerId);

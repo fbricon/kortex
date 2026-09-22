@@ -18,7 +18,7 @@
 
 import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { injectable, preDestroy } from 'inversify';
 
@@ -52,6 +52,16 @@ export class TempFileService implements IAsyncDisposable {
     // Track the temporary file for cleanup
     this.tempFiles.add(tempFilePath);
 
+    return tempFilePath;
+  }
+
+  async saveTempAttachment(fileName: string, base64Data: string): Promise<string> {
+    const safeName = basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const tempDir = tmpdir();
+    const tempFilePath = join(tempDir, `attachment-${Date.now()}-${safeName}`);
+    const buffer = Buffer.from(base64Data, 'base64');
+    await writeFile(tempFilePath, buffer);
+    this.tempFiles.add(tempFilePath);
     return tempFilePath;
   }
 

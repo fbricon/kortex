@@ -1,6 +1,7 @@
 <script lang="ts">
 import { faPaperclip, faPaperPlane, faSquare, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { Icon } from '@podman-desktop/ui-svelte/icons';
+import { toast } from '@zerodevx/svelte-toast';
 import { router } from 'tinro';
 
 import { acpSessions, acpSessionsEventStoreInfo } from '/@/stores/acp-sessions.svelte';
@@ -426,16 +427,131 @@ function getMimeType(filePath: string): string {
 async function handleAttach(): Promise<void> {
   const result = await window.openDialog({ title: 'Attach files', selectors: ['openFile', 'multiSelections'] });
   if (!result?.length) return;
-  const newAttachments: AcpAttachment[] = result.map((filePath: string) => ({
-    filePath,
-    fileName: filePath.split(/[/\\]/).pop() ?? filePath,
-    mimeType: getMimeType(filePath),
-  }));
-  pendingAttachments = [...pendingAttachments, ...newAttachments];
+  const newAttachments: AcpAttachment[] = [];
+  for (const filePath of result) {
+    const fileSize = await window.pathFileSize(filePath);
+    const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+    if (fileSize > MAX_FILE_SIZE_BYTES) {
+      rejectOversizedFile(fileName);
+      continue;
+    }
+    newAttachments.push({ filePath, fileName, mimeType: getMimeType(filePath) });
+  }
+  if (newAttachments.length > 0) {
+    pendingAttachments = [...pendingAttachments, ...newAttachments];
+  }
 }
 
 function removeAttachment(index: number): void {
   pendingAttachments = pendingAttachments.filter((_, i) => i !== index);
+}
+
+const MAX_FILE_SIZE_MB = 20;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+// TODO Refactor as part of https://github.com/openkaiden/kaiden/issues/2972
+const ERROR_TOAST_THEME = {
+  '--toastBackground': 'var(--pd-status-dead)',
+  '--toastColor': 'var(--pd-content-header-text)',
+  '--toastBarBackground': 'var(--pd-status-dead)',
+  '--toastPadding': '0.5rem 0.75rem',
+  '--toastMsgPadding': '0',
+};
+
+function rejectOversizedFile(fileName: string): void {
+  toast.push(`${fileName} is too large to attach (max ${MAX_FILE_SIZE_MB} MB).`, { theme: ERROR_TOAST_THEME });
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (): void => {
+      const dataUrl = reader.result as string;
+      resolve(dataUrl.split(',')[1] ?? '');
+    };
+    reader.onerror = (): void => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addFileAttachment(file: File): Promise<void> {
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    rejectOversizedFile(file.name);
+    return;
+  }
+  const base64 = await readFileAsBase64(file);
+  let mimeType = file.type;
+  if (!mimeType && file.name) {
+    mimeType = getMimeType(file.name);
+  }
+  mimeType ||= 'application/octet-stream';
+  const fileName = file.name || `pasted-file-${Date.now()}.${mimeType.split('/')[1] ?? 'bin'}`;
+  const filePath = await window.saveTempAttachment(fileName, base64);
+  pendingAttachments = [...pendingAttachments, { filePath, fileName, mimeType }];
+}
+
+let isDragging = $state(false);
+let dragDepth = 0;
+
+function isFileDrag(event: DragEvent): boolean {
+  return event.dataTransfer?.types?.includes('Files') ?? false;
+}
+
+function handleDragEnter(event: DragEvent): void {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  dragDepth++;
+  isDragging = true;
+}
+
+function handleDragOver(event: DragEvent): void {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+}
+
+function handleDragLeave(): void {
+  dragDepth--;
+  if (dragDepth <= 0) {
+    dragDepth = 0;
+    isDragging = false;
+  }
+}
+
+async function handleDrop(event: DragEvent): Promise<void> {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  isDragging = false;
+  dragDepth = 0;
+  const files = event.dataTransfer?.files;
+  if (!files?.length) return;
+  for (const file of Array.from(files)) {
+    await addFileAttachment(file);
+  }
+}
+
+function handlePaste(event: ClipboardEvent): void {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) return;
+  const hasFileItem = Array.from(clipboardData.items ?? []).some(item => item.kind === 'file');
+  if (!hasFileItem && clipboardData.files.length === 0) return;
+  const hasTextData =
+    clipboardData.types.includes('text/plain') && clipboardData.getData('text/plain').trim().length > 0;
+  if (hasTextData) return;
+  event.preventDefault();
+  const files: File[] = [];
+  for (const item of Array.from(clipboardData.items)) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  if (files.length === 0 && clipboardData.files.length > 0) {
+    files.push(...Array.from(clipboardData.files));
+  }
+  Promise.all(files.map(f => addFileAttachment(f))).catch((error: unknown) => {
+    console.error('Failed to process pasted files:', error);
+    toast.push('Failed to process pasted files.', { theme: ERROR_TOAST_THEME });
+  });
 }
 
 async function handleSendFollowUp(): Promise<void> {
@@ -617,7 +733,14 @@ function handleKeyDown(e: KeyboardEvent): void {
         </div>
       {/if}
 
-      <div class="rounded-lg border border-[var(--pd-input-field-stroke)] bg-[var(--pd-input-field-bg)] focus-within:ring-1 focus-within:ring-[var(--pd-input-field-stroke-highlight)]">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="rounded-lg border bg-[var(--pd-input-field-bg)] focus-within:ring-1 focus-within:ring-[var(--pd-input-field-stroke-highlight)] {isDragging ? 'border-[var(--pd-button-primary-bg)] border-dashed' : 'border-[var(--pd-input-field-stroke)]'}"
+        ondragenter={handleDragEnter}
+        ondragover={handleDragOver}
+        ondragleave={handleDragLeave}
+        ondrop={(e): void => { handleDrop(e).catch(console.error); }}
+      >
         <!-- Attachment chips -->
         {#if pendingAttachments.length > 0}
           <div class="flex flex-wrap gap-1.5 px-3 pt-2">
@@ -663,6 +786,7 @@ function handleKeyDown(e: KeyboardEvent): void {
             disabled={isWaitingInput}
             onkeydown={handleKeyDown}
             oninput={handleInput}
+            onpaste={handlePaste}
             class="w-full bg-transparent px-3 py-2 text-sm text-[var(--pd-input-field-focused-text)] placeholder-[var(--pd-input-field-placeholder-text)] focus:outline-none resize-none disabled:opacity-40 disabled:cursor-not-allowed"
           ></textarea>
         </div>

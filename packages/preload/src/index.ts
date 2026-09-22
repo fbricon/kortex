@@ -834,6 +834,13 @@ export function initExposure(): void {
     return ipcInvoke('temp-file-service:removeTempFile', filePath);
   });
 
+  contextBridge.exposeInMainWorld(
+    'saveTempAttachment',
+    async (fileName: string, base64Data: string): Promise<string> => {
+      return ipcInvoke('temp-file-service:saveTempAttachment', fileName, base64Data);
+    },
+  );
+
   contextBridge.exposeInMainWorld('stopPod', async (engine: string, podId: string): Promise<void> => {
     return ipcInvoke('container-provider-registry:stopPod', engine, podId);
   });

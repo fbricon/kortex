@@ -18,7 +18,7 @@
 
 import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -34,6 +34,7 @@ vi.mock('node:os', () => ({
 }));
 
 vi.mock('node:path', () => ({
+  basename: vi.fn().mockImplementation((p: string) => p.split('/').pop()),
   join: vi.fn().mockImplementation((...args) => args.join('/')),
 }));
 
@@ -50,6 +51,10 @@ class TestTempFileService extends TempFileService {
 
   override async cleanup(): Promise<void> {
     return super.cleanup();
+  }
+
+  override async saveTempAttachment(fileName: string, base64Data: string): Promise<string> {
+    return super.saveTempAttachment(fileName, base64Data);
   }
 
   override getTempFiles(): string[] {
@@ -251,5 +256,38 @@ describe('getTempFiles', () => {
     await tempFileService.createTempFile('content');
     const result = tempFileService.getTempFiles();
     expect(result).toEqual([expectedPath]);
+  });
+});
+
+describe('saveTempAttachment', () => {
+  test('writes base64 data as binary to temp file', async () => {
+    const base64Data = Buffer.from('hello').toString('base64');
+    const result = await tempFileService.saveTempAttachment('photo.png', base64Data);
+
+    expect(result).toBe('/tmp/attachment-1356048000000-photo.png');
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      '/tmp/attachment-1356048000000-photo.png',
+      Buffer.from(base64Data, 'base64'),
+    );
+    expect(tempFileService.getTempFiles()).toContain(result);
+  });
+
+  test('sanitizes file name', async () => {
+    const base64Data = Buffer.from('test').toString('base64');
+    const result = await tempFileService.saveTempAttachment('../../etc/passwd', base64Data);
+
+    expect(vi.mocked(basename)).toHaveBeenCalledWith('../../etc/passwd');
+    expect(result).toBe('/tmp/attachment-1356048000000-passwd');
+  });
+
+  test('tracks temp attachment for cleanup', async () => {
+    const base64Data = Buffer.from('data').toString('base64');
+    await tempFileService.saveTempAttachment('file.jpg', base64Data);
+
+    expect(tempFileService.getTempFiles()).toHaveLength(1);
+
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    await tempFileService.cleanup();
+    expect(tempFileService.getTempFiles()).toHaveLength(0);
   });
 });
