@@ -16,6 +16,8 @@ function noUsableGateways(gateways: GatewayInfo[]): boolean {
 {#if $openshellGatewaysReady && noUsableGateways($openshellGateways)}
   <div class="shrink-0 px-3 py-2 bg-(--pd-content-card-bg) flex items-center justify-between gap-3">
     <WarningMessage error="No usable OpenShell gateways available." />
-    <Button type="secondary" onclick={(): void => router.goto(GATEWAY_SETTINGS_PATH)}>Open gateway settings</Button>
+    {#if !$router.path.startsWith(GATEWAY_SETTINGS_PATH)}
+      <Button type="secondary" onclick={(): void => router.goto(GATEWAY_SETTINGS_PATH)}>Open gateway settings</Button>
+    {/if}
   </div>
 {/if}

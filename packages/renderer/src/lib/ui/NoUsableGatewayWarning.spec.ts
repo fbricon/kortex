@@ -19,6 +19,7 @@
 import '@testing-library/jest-dom/vitest';
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { writable } from 'svelte/store';
 import { router } from 'tinro';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -28,8 +29,12 @@ import NoUsableGatewayWarning from './NoUsableGatewayWarning.svelte';
 
 vi.mock(import('tinro'));
 
+const routerStore = writable({ path: '/', url: '/', from: '/', query: {} as Record<string, string>, hash: '' });
+
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(router).subscribe.mockImplementation(routerStore.subscribe);
+  routerStore.set({ path: '/', url: '/', from: '/', query: {} as Record<string, string>, hash: '' });
   openshellGateways.set([]);
   openshellGatewaysReady.set(false);
 });
@@ -84,6 +89,22 @@ test('shows a warning when a gateway reachability state is unavailable', () => {
   render(NoUsableGatewayWarning);
 
   expect(screen.getByRole('alert')).toHaveTextContent('No usable OpenShell gateways available.');
+});
+
+test('hides the settings button when already on the gateway settings page', () => {
+  routerStore.set({
+    path: '/preferences/openshell/gateways',
+    url: '/',
+    from: '/',
+    query: {} as Record<string, string>,
+    hash: '',
+  });
+  openshellGatewaysReady.set(true);
+
+  render(NoUsableGatewayWarning);
+
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Open gateway settings' })).not.toBeInTheDocument();
 });
 
 test('hides the warning when a gateway becomes available', async () => {
