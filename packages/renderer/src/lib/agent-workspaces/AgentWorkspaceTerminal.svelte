@@ -285,6 +285,7 @@ onMount(async () => {
     }
     window.addEventListener('resize', handleResize);
     await executeShellInWorkspace();
+    shellTerminal?.focus();
   } catch (err: unknown) {
     console.error(`Error starting terminal for workspace ${workspaceId}`, err);
     scheduleReconnect();

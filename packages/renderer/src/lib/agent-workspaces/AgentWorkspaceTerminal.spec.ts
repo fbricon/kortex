@@ -81,6 +81,17 @@ function getWorkspace(
   return { gateway: workspace.gateway, sandboxes: [{ ...workspace.sandboxes[0], phase }] };
 }
 
+test('focuses the terminal after the initial attachment completes', async () => {
+  openshellSandboxes.set([getWorkspace('Ready')]);
+  shellInAgentWorkspaceMock.mockResolvedValue(42);
+
+  render(AgentWorkspaceTerminal, { workspaceId: 'ws-1', screenReaderMode: true });
+
+  await waitFor(() => expect(shellInAgentWorkspaceMock).toHaveBeenCalled());
+  const textarea = document.querySelector<HTMLTextAreaElement>('.xterm textarea');
+  await waitFor(() => expect(document.activeElement).toBe(textarea));
+});
+
 test('opens shell and refits terminal when workspace transitions from starting to running', async () => {
   openshellSandboxes.set([getWorkspace('Provisioning')]);
 
