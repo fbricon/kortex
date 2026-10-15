@@ -42,6 +42,7 @@ export function mapSdkSandboxRef(ref: SandboxRef): SandboxInfo {
     id: ref.id,
     name: ref.name,
     phase: SDK_PHASE_MAP[ref.phase] ?? 'Unknown',
+    created_at: ref.createdAtMs !== undefined ? new Date(ref.createdAtMs).toISOString() : undefined,
     labels: ref.labels,
     resource_version: Number(ref.resourceVersion),
   };
